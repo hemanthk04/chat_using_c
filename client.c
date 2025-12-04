@@ -1,98 +1,81 @@
-// client.c - simple TCP chat client
+// client.c - Full-duplex chat using threads
 
-#include <stdio.h>      // printf, perror, fgets
-#include <stdlib.h>     // exit, EXIT_FAILURE
-#include <string.h>     // memset, strlen
-#include <unistd.h>     // close
-#include <sys/types.h>  // basic system data types
-#include <sys/socket.h> // socket, connect, send, recv
-#include <netinet/in.h> // struct sockaddr_in
-#include <arpa/inet.h>  // htons, inet_pton
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <pthread.h>
+#include <arpa/inet.h>
 
 #define PORT 9002
 #define BUFFER_SIZE 1024
 
-int main() {
-    int sock_fd;
-    struct sockaddr_in server_addr;
+int sock_fd;
+
+// Thread: receive messages from server
+void* receive_thread(void* arg) {
     char buffer[BUFFER_SIZE];
 
-    // 1. Create a TCP socket
-    sock_fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (sock_fd < 0) {
-        perror("socket failed");
-        exit(EXIT_FAILURE);
+    while (1) {
+        memset(buffer, 0, BUFFER_SIZE);
+        int bytes = recv(sock_fd, buffer, BUFFER_SIZE - 1, 0);
+
+        if (bytes <= 0) {
+            printf("\nServer disconnected.\n");
+            exit(0);
+        }
+
+        printf("\nServer: %s\nYou: ", buffer);
+        fflush(stdout);
+
+        if (strncmp(buffer, "quit", 4) == 0) {
+            printf("Server closed the chat.\n");
+            exit(0);
+        }
     }
+}
 
-    // 2. Prepare the server address structure
-    memset(&server_addr, 0, sizeof(server_addr));
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(PORT);
-
-    // 3. Convert and set server IP address (here: localhost 127.0.0.1)
-    if (inet_pton(AF_INET, "127.0.0.1", &server_addr.sin_addr) <= 0) {
-        perror("Invalid address/ Address not supported");
-        close(sock_fd);
-        exit(EXIT_FAILURE);
-    }
-
-    // 4. Connect to the server
-    if (connect(sock_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
-        perror("connect failed");
-        close(sock_fd);
-        exit(EXIT_FAILURE);
-    }
-
-    printf("Connected to server.\n");
-    printf("Type messages and press Enter to send. Type 'quit' to exit.\n");
+// Thread: send messages to server
+void* send_thread(void* arg) {
+    char buffer[BUFFER_SIZE];
 
     while (1) {
-        // 5. Read a line from stdin and send to server
         printf("You: ");
         fflush(stdout);
+
         memset(buffer, 0, BUFFER_SIZE);
-        if (fgets(buffer, BUFFER_SIZE, stdin) == NULL) {
-            printf("Error reading from stdin.\n");
-            break;
-        }
+        fgets(buffer, BUFFER_SIZE, stdin);
 
-        // Remove trailing newline
-        size_t len = strlen(buffer);
-        if (len > 0 && buffer[len - 1] == '\n') {
-            buffer[len - 1] = '\0';
-        }
+        buffer[strcspn(buffer, "\n")] = 0;
 
-        if (send(sock_fd, buffer, strlen(buffer), 0) < 0) {
-            perror("send failed");
-            break;
-        }
+        send(sock_fd, buffer, strlen(buffer), 0);
 
         if (strncmp(buffer, "quit", 4) == 0) {
-            printf("You requested to close the chat.\n");
-            break;
-        }
-
-        // 6. Receive a reply from the server
-        memset(buffer, 0, BUFFER_SIZE);
-        int bytes_received = recv(sock_fd, buffer, BUFFER_SIZE - 1, 0);
-        if (bytes_received < 0) {
-            perror("recv failed");
-            break;
-        } else if (bytes_received == 0) {
-            printf("Server disconnected.\n");
-            break;
-        }
-
-        printf("Server: %s\n", buffer);
-
-        if (strncmp(buffer, "quit", 4) == 0) {
-            printf("Server requested to close the chat.\n");
-            break;
+            printf("You closed the chat.\n");
+            exit(0);
         }
     }
+}
 
-    // 7. Close socket
+int main() {
+    struct sockaddr_in server_addr;
+
+    sock_fd = socket(AF_INET, SOCK_STREAM, 0);
+
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(PORT);
+    inet_pton(AF_INET, "127.0.0.1", &server_addr.sin_addr);
+
+    connect(sock_fd, (struct sockaddr*)&server_addr, sizeof(server_addr));
+    printf("Connected to server.\n");
+
+    pthread_t recv_t, send_t;
+    pthread_create(&recv_t, NULL, receive_thread, NULL);
+    pthread_create(&send_t, NULL, send_thread, NULL);
+
+    pthread_join(recv_t, NULL);
+    pthread_join(send_t, NULL);
+
     close(sock_fd);
-
     return 0;
 }
