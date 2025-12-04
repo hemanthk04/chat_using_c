@@ -22,7 +22,8 @@ void* receive_thread(void* arg) {
 
         if (bytes <= 0) {
             printf("\nServer disconnected.\n");
-            exit(0);
+            close(sock_fd);
+            pthread_exit(NULL);
         }
 
         printf("\nServer: %s\nYou: ", buffer);
@@ -30,7 +31,8 @@ void* receive_thread(void* arg) {
 
         if (strncmp(buffer, "quit", 4) == 0) {
             printf("Server closed the chat.\n");
-            exit(0);
+            close(sock_fd);
+            pthread_exit(NULL);
         }
     }
 }
@@ -45,14 +47,14 @@ void* send_thread(void* arg) {
 
         memset(buffer, 0, BUFFER_SIZE);
         fgets(buffer, BUFFER_SIZE, stdin);
-
         buffer[strcspn(buffer, "\n")] = 0;
 
         send(sock_fd, buffer, strlen(buffer), 0);
 
         if (strncmp(buffer, "quit", 4) == 0) {
             printf("You closed the chat.\n");
-            exit(0);
+            close(sock_fd);
+            pthread_exit(NULL);
         }
     }
 }

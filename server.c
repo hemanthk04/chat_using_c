@@ -6,11 +6,21 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <arpa/inet.h>
+#include <time.h>
 
 #define PORT 9002
 #define BUFFER_SIZE 1024
 
+FILE *logfile;
 int client_fd;
+
+char* timestamp() {
+    static char buffer[64];
+    time_t now = time(NULL);
+    struct tm *t = localtime(&now);
+    strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", t);
+    return buffer;
+}
 
 // Thread function: receives messages from client
 void* receive_thread(void* arg) {
@@ -22,15 +32,23 @@ void* receive_thread(void* arg) {
 
         if (bytes <= 0) {
             printf("\nClient disconnected.\n");
-            exit(0);
+            fprintf(logfile, "[%s] Client disconnected.\n", timestamp());
+            fflush(logfile);
+            close(client_fd);
+            pthread_exit(NULL);
         }
 
         printf("\nClient: %s\nYou: ", buffer);
         fflush(stdout);
 
+        // Log incoming message
+        fprintf(logfile, "[%s] Client → Server: %s\n", timestamp(), buffer);
+        fflush(logfile);
+
         if (strncmp(buffer, "quit", 4) == 0) {
             printf("Client requested to close chat.\n");
-            exit(0);
+            close(client_fd);
+            pthread_exit(NULL);
         }
     }
 }
@@ -45,14 +63,18 @@ void* send_thread(void* arg) {
 
         memset(buffer, 0, BUFFER_SIZE);
         fgets(buffer, BUFFER_SIZE, stdin);
-
-        buffer[strcspn(buffer, "\n")] = 0;  // remove newline
+        buffer[strcspn(buffer, "\n")] = 0;
 
         send(client_fd, buffer, strlen(buffer), 0);
 
+        // Log outgoing message
+        fprintf(logfile, "[%s] Server → Client: %s\n", timestamp(), buffer);
+        fflush(logfile);
+
         if (strncmp(buffer, "quit", 4) == 0) {
             printf("Closing chat.\n");
-            exit(0);
+            close(client_fd);
+            pthread_exit(NULL);
         }
     }
 }
@@ -76,6 +98,14 @@ int main() {
     client_fd = accept(server_fd, (struct sockaddr*)&client_addr, &client_len);
     printf("Client connected.\n");
 
+    // Open log
+    logfile = fopen("server_chat.log", "a");
+    fprintf(logfile, "[%s] Client connected from %s:%d\n",
+            timestamp(),
+            inet_ntoa(client_addr.sin_addr),
+            ntohs(client_addr.sin_port));
+    fflush(logfile);
+
     pthread_t recv_t, send_t;
     pthread_create(&recv_t, NULL, receive_thread, NULL);
     pthread_create(&send_t, NULL, send_thread, NULL);
@@ -85,5 +115,7 @@ int main() {
 
     close(client_fd);
     close(server_fd);
+    fclose(logfile);
+
     return 0;
 }
